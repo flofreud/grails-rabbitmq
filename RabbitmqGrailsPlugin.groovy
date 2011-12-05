@@ -87,15 +87,15 @@ The Rabbit MQ plugin provides integration with the Rabbit MQ Messaging System.
                 connectionFactory = rabbitMQConnectionFactory
             }
             adm(RabbitAdmin, rabbitMQConnectionFactory)
+            dynamicRabbitConsumerService(DynamicRabbitConsumerService) {
+                rabbitConfigurationHolder = configHolder
+                rabbitMQConnectionFactory = rabbitMQConnectionFactory
+            }
+
             Set registeredServices = new HashSet()
             application.serviceClasses.each { service ->
                 def serviceClass = service.clazz
                 def propertyName = service.propertyName
-
-                dynamicRabbitConsumerService(DynamicRabbitConsumerService) {
-                    rabbitConfigurationHolder = configHolder
-                    rabbitMQConnectionFactory = rabbitMQConnectionFactory
-                }
 
                 def rabbitQueue = configHolder.getServiceQueueName(service)
                 if(rabbitQueue) {

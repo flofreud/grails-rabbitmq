@@ -1,6 +1,8 @@
 package org.grails.rabbitmq
 
 import org.codehaus.groovy.grails.commons.GrailsClassUtils as GCU
+import org.codehaus.groovy.grails.commons.GrailsClass
+import org.codehaus.groovy.grails.commons.GrailsServiceClass
 
 /**
  * Used to pull configuration logic out of the main plugin file for
@@ -34,10 +36,10 @@ class RabbitConfigurationHolder {
      * Lookup the queue name of the listener, or return null if it is not found.
      */
     String getServiceQueueName(service) {
-        def clazz = (service.hasProperty('clazz'))? service.clazz : service.class
+        def isGrailsClass = service instanceof GrailsClass
+        def clazz = (isGrailsClass)? service.clazz : service.class
         String rabbitQueue = GCU.getStaticPropertyValue(clazz, 'rabbitQueue')
-
-        if(service.hasProperty('propertyName')){
+        if(isGrailsClass || service.hasProperty('propertyName')){
             def propertyName = service.propertyName
             if (!(rabbitmqConfig.services."${propertyName}".rabbitQueue instanceof ConfigObject)) {
                 rabbitQueue = rabbitmqConfig.services."${propertyName}".rabbitQueue as String
@@ -48,10 +50,10 @@ class RabbitConfigurationHolder {
 
     boolean isServiceTransactional(service) {
         def transactional = false
-        if(service.hasProperty('transactional')){
+        if(service instanceof GrailsServiceClass || service.hasProperty('transactional')){
             transactional = service.transactional
         }
-        if(service.hasProperty('propertyName')){
+        if(service instanceof GrailsClass || service.hasProperty('propertyName')){
             def propertyName = service.propertyName
 
             // for backwards compatibility use services version going forward
