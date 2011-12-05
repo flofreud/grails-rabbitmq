@@ -10,6 +10,7 @@ import org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer
 import org.springframework.amqp.rabbit.listener.adapter.MessageListenerAdapter
 import static org.springframework.amqp.core.Binding.DestinationType.QUEUE
 import org.grails.rabbitmq.RabbitConfigurationHolder
+import org.grails.rabbitmq.services.DynamicRabbitConsumerService
 
 class RabbitmqGrailsPlugin {
     // the plugin version
@@ -91,12 +92,12 @@ The Rabbit MQ plugin provides integration with the Rabbit MQ Messaging System.
                 def serviceClass = service.clazz
                 def propertyName = service.propertyName
 
-                def transactional = service.transactional
-                if (!(rabbitmqConfig."${propertyName}".transactional instanceof ConfigObject)) {
-                    transactional = rabbitmqConfig."${propertyName}".transactional as Boolean
+                dynamicRabbitConsumerService(DynamicRabbitConsumerService) {
+                    rabbitConfigurationHolder = configHolder
+                    rabbitMQConnectionFactory = rabbitMQConnectionFactory
                 }
 
-                def rabbitQueue = GCU.getStaticPropertyValue(serviceClass, 'rabbitQueue')
+                def rabbitQueue = configHolder.getServiceQueueName(service)
                 if(rabbitQueue) {
                     if(configHolder.isServiceEnabled(service)) {
                         def serviceConcurrentConsumers = configHolder.getServiceConcurrentConsumers(service)
@@ -109,7 +110,7 @@ The Rabbit MQ plugin provides integration with the Rabbit MQ Messaging System.
                             // We manually start the listener once we have attached the
                             // service in doWithApplicationContext.
                             autoStartup = false
-                            channelTransacted = transactional
+                            channelTransacted = configHolder.isServiceTransactional(service)
                             connectionFactory = rabbitMQConnectionFactory
                             concurrentConsumers = serviceConcurrentConsumers
                             queueNames = rabbitQueue
@@ -135,7 +136,7 @@ The Rabbit MQ plugin provides integration with the Rabbit MQ Messaging System.
                                     // We manually start the listener once we have attached the
                                     // service in doWithApplicationContext.
                                     autoStartup = false
-                                    channelTransacted = transactional
+                                    channelTransacted = configHolder.isServiceTransactional(service)
                                     connectionFactory = rabbitMQConnectionFactory
                                     concurrentConsumers = serviceConcurrentConsumers
                                     if (rabbitSubscribe instanceof Map) {
