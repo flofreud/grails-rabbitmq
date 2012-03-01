@@ -91,7 +91,7 @@ class RabbitConfigurationHolderTest extends GrailsUnitTestCase {
 
 }
 
-static class MockListener {
+class MockListener {
     def rabbitQueue = 'blueQueue'
     def transactional = false
     def propertyName = 'blueService'

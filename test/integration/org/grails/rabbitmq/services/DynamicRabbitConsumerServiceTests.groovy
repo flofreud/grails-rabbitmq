@@ -102,7 +102,7 @@ class DynamicRabbitConsumerServiceTests extends GrailsUnitTestCase {
     }
 }
 
-static class MockQueueService implements MessageListener {
+class MockQueueService implements MessageListener {
     static rabbitQueue = 'org.grails.rabbitmq.service.BlueQueue'
     static transactional = false
     def messages = []
