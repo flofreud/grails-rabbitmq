@@ -1,18 +1,23 @@
 import org.codehaus.groovy.grails.commons.GrailsClassUtils as GCU
+
 import org.grails.rabbitmq.AutoQueueMessageListenerContainer
 import org.grails.rabbitmq.RabbitDynamicMethods
 import org.grails.rabbitmq.RabbitQueueBuilder
+import org.grails.rabbitmq.DefaultErrorHandler
+import org.grails.rabbitmq.RabbitConfigurationHolder
+import org.grails.rabbitmq.services.DynamicRabbitConsumerService
+
 import org.springframework.amqp.core.Binding
 import org.springframework.amqp.core.Queue
 import org.springframework.amqp.rabbit.core.RabbitAdmin
 import org.springframework.amqp.rabbit.core.RabbitTemplate
 import org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer
 import org.springframework.amqp.rabbit.listener.adapter.MessageListenerAdapter
-import static org.springframework.amqp.core.Binding.DestinationType.QUEUE
-import org.grails.rabbitmq.RabbitConfigurationHolder
 import org.springframework.amqp.core.Message
+
+import static org.springframework.amqp.core.Binding.DestinationType.QUEUE
+
 import org.springframework.util.ErrorHandler
-import org.grails.rabbitmq.DefaultErrorHandler
 
 class RabbitmqGrailsPlugin {
     // the plugin version
@@ -90,18 +95,18 @@ class RabbitmqGrailsPlugin {
                 if (messageConverterBean) messageConverter = ref(messageConverterBean)
             }
             adm(RabbitAdmin, rabbitMQConnectionFactory)
+			
+            dynamicRabbitConsumerService(DynamicRabbitConsumerService) {
+                rabbitConfigurationHolder = configHolder
+                rabbitMQConnectionFactory = rabbitMQConnectionFactory
+            }
 
             Set registeredServices = new HashSet()
             application.serviceClasses.each { service ->
                 def serviceClass = service.clazz
                 def propertyName = service.propertyName
 
-                def transactional = service.transactional
-                if (!(rabbitmqConfig."${propertyName}".transactional instanceof ConfigObject)) {
-                    transactional = rabbitmqConfig."${propertyName}".transactional as Boolean
-                }
-
-                def rabbitQueue = GCU.getStaticPropertyValue(serviceClass, 'rabbitQueue')
+                def rabbitQueue = configHolder.getServiceQueueName(service)
                 if(rabbitQueue) {
                     if(configHolder.isServiceEnabled(service)) {
                         def serviceConcurrentConsumers = configHolder.getServiceConcurrentConsumers(service)
@@ -114,7 +119,7 @@ class RabbitmqGrailsPlugin {
                             // We manually start the listener once we have attached the
                             // service in doWithApplicationContext.
                             autoStartup = false
-                            channelTransacted = transactional
+                            channelTransacted = configHolder.isServiceTransactional(service)
                             connectionFactory = rabbitMQConnectionFactory
                             concurrentConsumers = serviceConcurrentConsumers
                             queueNames = rabbitQueue
@@ -141,7 +146,7 @@ class RabbitmqGrailsPlugin {
                                     // We manually start the listener once we have attached the
                                     // service in doWithApplicationContext.
                                     autoStartup = false
-                                    channelTransacted = transactional
+                                    channelTransacted = configHolder.isServiceTransactional(service)
                                     connectionFactory = rabbitMQConnectionFactory
                                     concurrentConsumers = serviceConcurrentConsumers
                                     if (rabbitSubscribe instanceof Map) {

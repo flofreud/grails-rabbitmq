@@ -13,6 +13,7 @@ class RabbitConfigurationHolderTest extends GrailsUnitTestCase {
                 redService {
                     concurrentConsumers = 3
                     disableListening = false
+                    transactional = true
                 }
                 blueService {
                     disableListening = true
@@ -23,6 +24,12 @@ class RabbitConfigurationHolderTest extends GrailsUnitTestCase {
 
     def enabledConfig = toConfigHolder("""
         rabbitmq {
+
+            // outside of services block for backwards compatibility
+            redService {
+                transactional = true
+            }
+
             services {
                 redService {
                     concurrentConsumers = 5
@@ -35,9 +42,9 @@ class RabbitConfigurationHolderTest extends GrailsUnitTestCase {
         }
     """)
 
-    def blueService = [getPropertyName: {'blueService'}] as GrailsClass
-    def redService = [getPropertyName: {'redService'}] as GrailsClass
-    def pinkService = [getPropertyName: {'pinkService'}] as GrailsClass
+    def blueService = new MockListener(propertyName: 'blueService', transactional: false, rabbitQueue: 'blueQueue')
+    def redService = new MockListener(propertyName: 'redService', transactional: false, rabbitQueue: 'redQueue')
+    def pinkService = new MockListener(propertyName: 'pinkService', transactional: true, rabbitQueue: 'pinkQueue')
 
     def toConfigHolder(String config) {
         return new RabbitConfigurationHolder(new ConfigSlurper().parse(config).rabbitmq)
@@ -56,6 +63,7 @@ class RabbitConfigurationHolderTest extends GrailsUnitTestCase {
         assert enabledConfig.getServiceConcurrentConsumers(redService) == 5
         assert enabledConfig.getServiceConcurrentConsumers(blueService) == 1
         assert enabledConfig.getServiceConcurrentConsumers(pinkService) == 1
+        assert enabledConfig.getServiceConcurrentConsumers(new Object()) == 1
     }
 
     void testListeningDisabled() {
@@ -73,4 +81,18 @@ class RabbitConfigurationHolderTest extends GrailsUnitTestCase {
         assert enabledConfig.isServiceEnabled(pinkService)
     }
 
+    void testIsServiceTransactional() {
+        assert ! enabledConfig.isServiceTransactional(blueService)
+        assert enabledConfig.isServiceTransactional(redService)
+        assert enabledConfig.isServiceTransactional(pinkService)
+        assert !enabledConfig.isServiceTransactional(new Object())
+        assert disabledConfig.isServiceTransactional(redService)
+    }
+
+}
+
+static class MockListener {
+    def rabbitQueue = 'blueQueue'
+    def transactional = false
+    def propertyName = 'blueService'
 }

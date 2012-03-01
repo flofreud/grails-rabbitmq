@@ -1,5 +1,13 @@
 package org.grails.rabbitmq
 
+import org.codehaus.groovy.grails.commons.GrailsClassUtils as GCU
+import org.codehaus.groovy.grails.commons.GrailsClass
+import org.codehaus.groovy.grails.commons.GrailsServiceClass
+
+/**
+ * Used to pull configuration logic out of the main plugin file for
+ * testability and reuse.
+ */
 class RabbitConfigurationHolder {
 
     def rabbitmqConfig
@@ -12,9 +20,51 @@ class RabbitConfigurationHolder {
         return rabbitmqConfig.concurrentConsumers ?: 1
     }
 
-    int getServiceConcurrentConsumers(def service) {
-        def propertyName = service.propertyName
-        return rabbitmqConfig.services?."${propertyName}"?.concurrentConsumers ?: defaultConcurrentConsumers
+    int getServiceConcurrentConsumers(service) {
+        def concurrentConsumers = defaultConcurrentConsumers
+
+        if(service.hasProperty('propertyName')){        
+            def propertyName = service.propertyName
+            if(!(rabbitmqConfig.services."${propertyName}".concurrentConsumers instanceof ConfigObject)){
+                concurrentConsumers = rabbitmqConfig.services."${propertyName}".concurrentConsumers as int
+            }
+        }
+        return concurrentConsumers 
+    }
+
+    /**
+     * Lookup the queue name of the listener, or return null if it is not found.
+     */
+    String getServiceQueueName(service) {
+        def isGrailsClass = service instanceof GrailsClass
+        def clazz = (isGrailsClass)? service.clazz : service.class
+        String rabbitQueue = GCU.getStaticPropertyValue(clazz, 'rabbitQueue')
+        if(isGrailsClass || service.hasProperty('propertyName')){
+            def propertyName = service.propertyName
+            if (!(rabbitmqConfig.services."${propertyName}".rabbitQueue instanceof ConfigObject)) {
+                rabbitQueue = rabbitmqConfig.services."${propertyName}".rabbitQueue as String
+            }
+        }
+        return rabbitQueue
+    }
+
+    boolean isServiceTransactional(service) {
+        def transactional = false
+        if(service instanceof GrailsServiceClass || service.hasProperty('transactional')){
+            transactional = service.transactional
+        }
+        if(service instanceof GrailsClass || service.hasProperty('propertyName')){
+            def propertyName = service.propertyName
+
+            // for backwards compatibility use services version going forward
+            if (!(rabbitmqConfig."${propertyName}".transactional instanceof ConfigObject)) {
+                transactional = rabbitmqConfig."${propertyName}".transactional as Boolean
+            }
+            if (!(rabbitmqConfig.services."${propertyName}".transactional instanceof ConfigObject)) {
+                transactional = rabbitmqConfig.services."${propertyName}".transactional as Boolean
+            }
+        }
+        return transactional
     }
 
     boolean isListeningDisabled() {
