@@ -63,7 +63,7 @@ class RabbitQueueBuilder {
                             "and must be a map.")
                 }
 
-                newBinding.rule = argsMap.binding
+                newBinding.arguments = argsMap.binding
                 break
 
             case TopicExchange:

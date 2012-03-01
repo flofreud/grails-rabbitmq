@@ -10,10 +10,13 @@ import org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer
 import org.springframework.amqp.rabbit.listener.adapter.MessageListenerAdapter
 import static org.springframework.amqp.core.Binding.DestinationType.QUEUE
 import org.grails.rabbitmq.RabbitConfigurationHolder
+import org.springframework.amqp.core.Message
+import org.springframework.util.ErrorHandler
+import org.grails.rabbitmq.DefaultErrorHandler
 
 class RabbitmqGrailsPlugin {
     // the plugin version
-    def version = "0.3.4-SNAPSHOT"
+    def version = "0.3.6-ML"
     // the version or versions of Grails the plugin is designed for
     def grailsVersion = "1.2 > *"
     // the other plugins this plugin depends on
@@ -87,6 +90,7 @@ class RabbitmqGrailsPlugin {
                 if (messageConverterBean) messageConverter = ref(messageConverterBean)
             }
             adm(RabbitAdmin, rabbitMQConnectionFactory)
+
             Set registeredServices = new HashSet()
             application.serviceClasses.each { service ->
                 def serviceClass = service.clazz
@@ -114,6 +118,7 @@ class RabbitmqGrailsPlugin {
                             connectionFactory = rabbitMQConnectionFactory
                             concurrentConsumers = serviceConcurrentConsumers
                             queueNames = rabbitQueue
+
                         }
                     } else {
                         log.info("Not listening to ${service.clazz} it is disabled in configuration")
@@ -229,9 +234,19 @@ class RabbitmqGrailsPlugin {
             if(beanName.endsWith(LISTENER_CONTAINER_SUFFIX)) {
                 def adapter = new MessageListenerAdapter()
                 def serviceName = beanName - LISTENER_CONTAINER_SUFFIX
-                adapter.delegate = applicationContext.getBean(serviceName)
-                adapter.messageConverter = rabbitTemplate.messageConverter
+				
+                def service = applicationContext.getBean(serviceName)
+                adapter.delegate = service
+
+                // If service responds to raw message remove SimpleMessageConverter
+                if(service.respondsTo('handleMessage', Message)) {
+                    adapter.messageConverter = null
+                } else {
+					adapter.messageConverter = rabbitTemplate.messageConverter
+                }
+				
                 bean.messageListener = adapter
+                bean.errorHandler = new DefaultErrorHandler(serviceName)
                 
                 // Now that the listener is properly configured, we can start it.
                 bean.start()
