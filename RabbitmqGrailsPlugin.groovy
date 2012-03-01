@@ -6,6 +6,7 @@ import org.grails.rabbitmq.RabbitQueueBuilder
 import org.grails.rabbitmq.DefaultErrorHandler
 import org.grails.rabbitmq.RabbitConfigurationHolder
 import org.grails.rabbitmq.services.DynamicRabbitConsumerService
+import org.grails.rabbitmq.RabbitConfigurationHolder
 
 import org.springframework.amqp.core.Binding
 import org.springframework.amqp.core.Queue
@@ -16,8 +17,8 @@ import org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer
 import org.springframework.amqp.rabbit.listener.adapter.MessageListenerAdapter
 import org.springframework.amqp.support.converter.MessageConverter
 import static org.springframework.amqp.core.Binding.DestinationType.QUEUE
-
 import org.springframework.util.ErrorHandler
+import org.springframework.jndi.JndiObjectFactoryBean
 
 class RabbitmqGrailsPlugin {
     // the plugin version
@@ -63,16 +64,16 @@ class RabbitmqGrailsPlugin {
 
         def connectionFactoryConfig = rabbitmqConfig?.connectionfactory
         
+        def connectionFactoryJndiName = connectionFactoryConfig?.jndiName
         def connectionFactoryUsername = connectionFactoryConfig?.username
         def connectionFactoryPassword = connectionFactoryConfig?.password
         def connectionFactoryVirtualHost = connectionFactoryConfig?.virtualHost
         def connectionFactoryHostname = connectionFactoryConfig?.hostname
         def connectionChannelCacheSize = connectionFactoryConfig?.channelCacheSize ?: 10
 
-        def messageConverterBean = rabbitmqConfig.messageConverterBean
+		def messageConverterBean = rabbitmqConfig.messageConverterBean
 
-        if(!connectionFactoryUsername || !connectionFactoryPassword || !connectionFactoryHostname) {
-            log.error 'RabbitMQ connection factory settings (rabbitmq.connectionfactory.username, rabbitmq.connectionfactory.password and rabbitmq.connectionfactory.hostname) must be defined in Config.groovy'
+		if(!connectionFactoryJndiName && (!connectionFactoryUsername || !connectionFactoryPassword || !connectionFactoryHostname)) {
         } else {
           
             log.debug "Connecting to rabbitmq ${connectionFactoryUsername}@${connectionFactoryHostname} with ${configHolder.getDefaultConcurrentConsumers()} consumers."
@@ -81,14 +82,21 @@ class RabbitmqGrailsPlugin {
             def parentClassLoader = getClass().classLoader
             def loader = new GroovyClassLoader(parentClassLoader)
             def connectionFactoryClass = loader.loadClass(connectionFactoryClassName)
-            rabbitMQConnectionFactory(connectionFactoryClass, connectionFactoryHostname) {
-                username = connectionFactoryUsername
-                password = connectionFactoryPassword
-                channelCacheSize = connectionChannelCacheSize
+            if(!connectionFactoryJndiName){
+              rabbitMQConnectionFactory(connectionFactoryClass, connectionFactoryHostname) {
+                  username = connectionFactoryUsername
+                  password = connectionFactoryPassword
+                  channelCacheSize = connectionChannelCacheSize
 
-                if (connectionFactoryVirtualHost) {
-                    virtualHost = connectionFactoryVirtualHost
-                }
+                  if (connectionFactoryVirtualHost) {
+                      virtualHost = connectionFactoryVirtualHost
+                  }
+              }
+            }else{
+              underlyingConnectionFactory(JndiObjectFactoryBean){
+                jndiName=connectionFactoryJndiName
+              }
+              rabbitMQConnectionFactory(connectionFactoryClass, underlyingConnectionFactory)
             }
             rabbitTemplate(RabbitTemplate) {
                 connectionFactory = rabbitMQConnectionFactory
