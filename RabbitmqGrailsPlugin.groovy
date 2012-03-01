@@ -1,9 +1,15 @@
 import org.codehaus.groovy.grails.commons.GrailsClassUtils as GCU
+
 import org.grails.rabbitmq.AutoQueueMessageListenerContainer
 import org.grails.rabbitmq.RabbitDynamicMethods
 import org.grails.rabbitmq.RabbitQueueBuilder
+import org.grails.rabbitmq.DefaultErrorHandler
+import org.grails.rabbitmq.RabbitConfigurationHolder
+import org.grails.rabbitmq.services.DynamicRabbitConsumerService
+
 import org.springframework.amqp.core.Binding
 import org.springframework.amqp.core.Queue
+import org.springframework.amqp.core.Message
 import org.springframework.amqp.rabbit.core.RabbitAdmin
 import org.springframework.amqp.rabbit.core.RabbitTemplate
 import org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer
@@ -11,9 +17,11 @@ import org.springframework.amqp.rabbit.listener.adapter.MessageListenerAdapter
 import org.springframework.amqp.support.converter.MessageConverter
 import static org.springframework.amqp.core.Binding.DestinationType.QUEUE
 
+import org.springframework.util.ErrorHandler
+
 class RabbitmqGrailsPlugin {
     // the plugin version
-    def version = "0.3.3"
+    def version = "0.3.6-ML"
     // the version or versions of Grails the plugin is designed for
     def grailsVersion = "1.2 > *"
     // the other plugins this plugin depends on
@@ -31,10 +39,8 @@ class RabbitmqGrailsPlugin {
 
     def author = "Jeff Brown"
     def authorEmail = "jeff.brown@springsource.com"
-    def title = "Rabbit MQ"
-    def description = '''\\
-The Rabbit MQ plugin provides integration with the Rabbit MQ Messaging System.
-'''
+    def title = "RabbitMQ Plugin"
+    def description = "The RabbitMQ plugin provides integration with the RabbitMQ Messaging System."
 
     def license = "APACHE"
     def organization = [ name: "SpringSource", url: "http://www.springsource.org/" ]
@@ -51,8 +57,10 @@ The Rabbit MQ plugin provides integration with the Rabbit MQ Messaging System.
     private static LISTENER_CONTAINER_SUFFIX = '_MessageListenerContainer'
 
     def doWithSpring = { 
-        
+
         def rabbitmqConfig = application.config.rabbitmq
+        def configHolder = new RabbitConfigurationHolder(rabbitmqConfig)
+
         def connectionFactoryConfig = rabbitmqConfig?.connectionfactory
         
         def connectionFactoryUsername = connectionFactoryConfig?.username
@@ -60,13 +68,14 @@ The Rabbit MQ plugin provides integration with the Rabbit MQ Messaging System.
         def connectionFactoryVirtualHost = connectionFactoryConfig?.virtualHost
         def connectionFactoryHostname = connectionFactoryConfig?.hostname
         def connectionChannelCacheSize = connectionFactoryConfig?.channelCacheSize ?: 10
-        def connectionFactoryConsumers = rabbitmqConfig.concurrentConsumers ?: 1
-        
+
+        def messageConverterBean = rabbitmqConfig.messageConverterBean
+
         if(!connectionFactoryUsername || !connectionFactoryPassword || !connectionFactoryHostname) {
             log.error 'RabbitMQ connection factory settings (rabbitmq.connectionfactory.username, rabbitmq.connectionfactory.password and rabbitmq.connectionfactory.hostname) must be defined in Config.groovy'
         } else {
           
-            log.debug "Connecting to rabbitmq ${connectionFactoryUsername}@${connectionFactoryHostname} with ${connectionFactoryConsumers} consumers."
+            log.debug "Connecting to rabbitmq ${connectionFactoryUsername}@${connectionFactoryHostname} with ${configHolder.getDefaultConcurrentConsumers()} consumers."
           
             def connectionFactoryClassName = connectionFactoryConfig?.className ?: 'org.springframework.amqp.rabbit.connection.CachingConnectionFactory'
             def parentClassLoader = getClass().classLoader
@@ -83,29 +92,41 @@ The Rabbit MQ plugin provides integration with the Rabbit MQ Messaging System.
             }
             rabbitTemplate(RabbitTemplate) {
                 connectionFactory = rabbitMQConnectionFactory
+                if (messageConverterBean) messageConverter = ref(messageConverterBean)
             }
             adm(RabbitAdmin, rabbitMQConnectionFactory)
+			
+            dynamicRabbitConsumerService(DynamicRabbitConsumerService) {
+                rabbitConfigurationHolder = configHolder
+                rabbitMQConnectionFactory = rabbitMQConnectionFactory
+            }
+
+            Set registeredServices = new HashSet()
             application.serviceClasses.each { service ->
-                
                 def serviceClass = service.clazz
                 def propertyName = service.propertyName
 
-                def transactional = service.transactional
-                if (!(rabbitmqConfig."${propertyName}".transactional instanceof ConfigObject)) {
-                    transactional = rabbitmqConfig."${propertyName}".transactional as Boolean
-                }
-        
-                def rabbitQueue = GCU.getStaticPropertyValue(serviceClass, 'rabbitQueue')
-                
-                if(rabbitQueue) { 
-                    "${propertyName}${LISTENER_CONTAINER_SUFFIX}"(SimpleMessageListenerContainer) {
-                        // We manually start the listener once we have attached the
-                        // service in doWithApplicationContext.
-                        autoStartup = false
-                        channelTransacted = transactional
-                        connectionFactory = rabbitMQConnectionFactory
-                        concurrentConsumers = connectionFactoryConsumers
-                        queueNames = rabbitQueue
+                def rabbitQueue = configHolder.getServiceQueueName(service)
+                if(rabbitQueue) {
+                    if(configHolder.isServiceEnabled(service)) {
+                        def serviceConcurrentConsumers = configHolder.getServiceConcurrentConsumers(service)
+                        log.info("Setting up rabbitmq listener for ${service.clazz} with ${serviceConcurrentConsumers} consumer(s)")
+                        if(!registeredServices.add(propertyName)){
+                            throw new IllegalArgumentException("Unable to initialize rabbitmq listeners properly. More than one service named ${propertyName}.")
+                        }
+
+                        "${propertyName}${LISTENER_CONTAINER_SUFFIX}"(SimpleMessageListenerContainer) {
+                            // We manually start the listener once we have attached the
+                            // service in doWithApplicationContext.
+                            autoStartup = false
+                            channelTransacted = configHolder.isServiceTransactional(service)
+                            connectionFactory = rabbitMQConnectionFactory
+                            concurrentConsumers = serviceConcurrentConsumers
+                            queueNames = rabbitQueue
+
+                        }
+                    } else {
+                        log.info("Not listening to ${service.clazz} it is disabled in configuration")
                     }
                 }
                 else {
@@ -115,20 +136,29 @@ The Rabbit MQ plugin provides integration with the Rabbit MQ Messaging System.
                             log.error "The 'rabbitSubscribe' property on service ${service.fullName} must be a string or a map"
                         }
                         else {
-                            "${propertyName}${LISTENER_CONTAINER_SUFFIX}"(AutoQueueMessageListenerContainer) {
-                                // We manually start the listener once we have attached the
-                                // service in doWithApplicationContext.
-                                autoStartup = false
-                                channelTransacted = transactional
-                                connectionFactory = rabbitMQConnectionFactory
-                                concurrentConsumers = connectionFactoryConsumers
-                                if (rabbitSubscribe instanceof Map) {
-                                    exchangeBeanName = "grails.rabbit.exchange.${rabbitSubscribe.name}"
-                                    routingKey = rabbitSubscribe.routingKey ?: '#'
+                            if(configHolder.isServiceEnabled(service)) {
+                                def serviceConcurrentConsumers = configHolder.getServiceConcurrentConsumers(service)
+                                log.info("Setting up rabbitmq listener for ${service.clazz} with ${serviceConcurrentConsumers} consumer(s)")
+                                if(!registeredServices.add(propertyName)){
+                                    throw new IllegalArgumentException("Unable to initialize rabbitmq listeners properly. More than one service named ${propertyName}.")
                                 }
-                                else {
-                                    exchangeBeanName = "grails.rabbit.exchange.${rabbitSubscribe}"
+                                "${propertyName}${LISTENER_CONTAINER_SUFFIX}"(AutoQueueMessageListenerContainer) {
+                                    // We manually start the listener once we have attached the
+                                    // service in doWithApplicationContext.
+                                    autoStartup = false
+                                    channelTransacted = configHolder.isServiceTransactional(service)
+                                    connectionFactory = rabbitMQConnectionFactory
+                                    concurrentConsumers = serviceConcurrentConsumers
+                                    if (rabbitSubscribe instanceof Map) {
+                                        exchangeBeanName = "grails.rabbit.exchange.${rabbitSubscribe.name}"
+                                        routingKey = rabbitSubscribe.routingKey ?: '#'
+                                    }
+                                    else {
+                                        exchangeBeanName = "grails.rabbit.exchange.${rabbitSubscribe}"
+                                    }
                                 }
+                            } else {
+                                log.info("Not listening to ${service.clazz} it is disabled in configuration")
                             }
                         }
                     }
@@ -203,24 +233,35 @@ The Rabbit MQ plugin provides integration with the Rabbit MQ Messaging System.
     }
 
     def doWithApplicationContext = { applicationContext ->
+        def rabbitTemplate = applicationContext.getBean('rabbitTemplate', RabbitTemplate.class)
         def containerBeans = applicationContext.getBeansOfType(SimpleMessageListenerContainer)
         containerBeans.each { beanName, bean ->
             if(beanName.endsWith(LISTENER_CONTAINER_SUFFIX)) {
                 def adapter = new MessageListenerAdapter()
                 def serviceName = beanName - LISTENER_CONTAINER_SUFFIX
-                adapter.delegate = applicationContext.getBean(serviceName)
 
-                if (adapter.delegate.metaClass.hasProperty(adapter.delegate, 'messageConverter')) {
-                    def loader = new GroovyClassLoader(getClass().classLoader)
-                    MessageConverter messageConverterObj = null
-                    if (adapter.delegate.messageConverter) {
-                        def MessageConverterClass = loader.loadClass(adapter.delegate.messageConverter)
-                        messageConverterObj = (MessageConverter) MessageConverterClass.newInstance()
-                    }
-                    adapter.setMessageConverter(messageConverterObj)
+				def service = applicationContext.getBean(serviceName)
+                adapter.delegate = service
+
+                // If service defines explicit a message converter this will be used
+				if (adapter.delegate.metaClass.hasProperty(service, 'messageConverter')) {
+					def loader = new GroovyClassLoader(getClass().classLoader)
+					MessageConverter messageConverterObj = null
+					if (service.messageConverter) {
+						def MessageConverterClass = loader.loadClass(service.messageConverter)
+						messageConverterObj = (MessageConverter) MessageConverterClass.newInstance()
+					}
+					adapter.messageConverter = messageConverterObj
+				// If service responds to raw message no message converter will be set
+				} else if(service.respondsTo('handleMessage', Message)) {
+                    adapter.messageConverter = null
+				// Else we use the SimpleMessageConverter or what ever is configurated	
+                } else {
+					adapter.messageConverter = rabbitTemplate.messageConverter
                 }
 
                 bean.messageListener = adapter
+                bean.errorHandler = new DefaultErrorHandler(serviceName)
                 
                 // Now that the listener is properly configured, we can start it.
                 bean.start()
