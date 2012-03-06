@@ -22,7 +22,7 @@ import org.springframework.jndi.JndiObjectFactoryBean
 
 class RabbitmqGrailsPlugin {
     // the plugin version
-    def version = "0.3.6-ML"
+    def version = "0.3.5-custom"
     // the version or versions of Grails the plugin is designed for
     def grailsVersion = "1.2 > *"
     // the other plugins this plugin depends on
@@ -74,7 +74,8 @@ class RabbitmqGrailsPlugin {
 		def messageConverterBean = rabbitmqConfig.messageConverterBean
 
 		if(!connectionFactoryJndiName && (!connectionFactoryUsername || !connectionFactoryPassword || !connectionFactoryHostname)) {
-        } else {
+			log.error 'RabbitMQ connection factory settings (rabbitmq.connectionfactory.username, rabbitmq.connectionfactory.password and rabbitmq.connectionfactory.hostname) must be defined in Config.groovy'
+		} else {
           
             log.debug "Connecting to rabbitmq ${connectionFactoryUsername}@${connectionFactoryHostname} with ${configHolder.getDefaultConcurrentConsumers()} consumers."
           

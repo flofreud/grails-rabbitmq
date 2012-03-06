@@ -14,4 +14,19 @@ environments {
             }
         }
     }
+	development {
+		rabbitmq {
+			connectionfactory {
+				username = 'guest'
+				password = 'guest'
+				hostname = 'localhost'
+			}
+		}
+	}
+}
+
+log4j = {
+	root {
+		warn 'stdout'
+	}
 }
