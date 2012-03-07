@@ -22,7 +22,7 @@ import org.springframework.jndi.JndiObjectFactoryBean
 
 class RabbitmqGrailsPlugin {
     // the plugin version
-    def version = "0.3.5-custom"
+    def version = "0.3.5.1-custom"
     // the version or versions of Grails the plugin is designed for
     def grailsVersion = "1.2 > *"
     // the other plugins this plugin depends on
@@ -30,7 +30,6 @@ class RabbitmqGrailsPlugin {
     // resources that are excluded from plugin packaging
     def pluginExcludes = [
             "grails-app/views/error.gsp",
-            "grails-app/services/**",
             "grails-app/controllers/**",
             "grails-app/views/message/*",
             "grails-app/conf/Config.groovy",
